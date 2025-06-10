@@ -293,7 +293,13 @@ class LLMController(Runnable):
             Model response
         """
         try:
-            return self._current_model.invoke(input, config, **kwargs)
+            response = self._current_model.invoke(input, config, **kwargs)
+            
+            # Handle Ollama's string response - wrap it in AIMessage for consistency
+            if self.provider == "ollama" and isinstance(response, str):
+                return AIMessage(content=response)
+            
+            return response
         except Exception as e:
             raise RuntimeError(
                 f"Error invoking {self.provider} model '{self.llm_name}': {e}"
@@ -303,7 +309,13 @@ class LLMController(Runnable):
         """Async version of invoke"""
         try:
             if hasattr(self._current_model, 'ainvoke'):
-                return await self._current_model.ainvoke(input, config, **kwargs)
+                response = await self._current_model.ainvoke(input, config, **kwargs)
+                
+                # Handle Ollama's string response - wrap it in AIMessage for consistency
+                if self.provider == "ollama" and isinstance(response, str):
+                    return AIMessage(content=response)
+                
+                return response
             else:
                 # Fallback for models that don't support async
                 import asyncio
@@ -329,7 +341,12 @@ class LLMController(Runnable):
             Response chunks
         """
         try:
-            return self._current_model.stream(input, config, **kwargs)
+            for chunk in self._current_model.stream(input, config, **kwargs):
+                # Handle Ollama's string chunks - wrap them in AIMessage for consistency
+                if self.provider == "ollama" and isinstance(chunk, str):
+                    yield AIMessage(content=chunk)
+                else:
+                    yield chunk
         except Exception as e:
             raise RuntimeError(
                 f"Error streaming from {self.provider} model '{self.llm_name}': {e}"
@@ -364,7 +381,19 @@ class LLMController(Runnable):
         """
         try:
             if hasattr(self._current_model, 'batch'):
-                return self._current_model.batch(inputs, config, **kwargs)
+                responses = self._current_model.batch(inputs, config, **kwargs)
+                
+                # Handle Ollama's string responses - wrap them in AIMessage for consistency
+                if self.provider == "ollama":
+                    processed_responses = []
+                    for response in responses:
+                        if isinstance(response, str):
+                            processed_responses.append(AIMessage(content=response))
+                        else:
+                            processed_responses.append(response)
+                    return processed_responses
+                
+                return responses
             else:
                 # Fallback: process one by one
                 return [self.invoke(input, config, **kwargs) for input in inputs]
