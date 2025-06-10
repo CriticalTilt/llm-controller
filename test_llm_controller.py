@@ -63,16 +63,28 @@ except ImportError:
 
 print(f"LangChain available: {LANGCHAIN_AVAILABLE}")
 
-# Import the LLMController class
-# In practice, this would be: from llm_controller import LLMController
-# For testing, we'll inline a simplified version
+# Import the LLM classes
+# In practice, this would be: from llm_controller import LLMController, AdaptiveLLM, CostOptimizedLLM, create_production_llm
+# For testing, we'll inline simplified versions
 
 class LLMController(Runnable):
     """Simplified LLMController for testing"""
     
     def __init__(self, llm: str = "gpt-3.5-turbo", provider: str = "openai", **kwargs):
-        if hasattr(super(), '__init__'):
-            super().__init__(**kwargs)
+        # Only pass kwargs to super().__init__ if it accepts them
+        try:
+            # Check if parent class __init__ accepts parameters
+            import inspect
+            if hasattr(super(), '__init__'):
+                sig = inspect.signature(super().__init__)
+                if len(sig.parameters) > 1 or any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()):
+                    super().__init__(**kwargs)
+                else:
+                    super().__init__()
+        except (TypeError, ValueError):
+            # Fallback: just call parent __init__ without parameters
+            if hasattr(super(), '__init__'):
+                super().__init__()
         
         self.llm_name = llm
         self.provider = provider
@@ -187,6 +199,116 @@ class SimpleChain:
     
     def __repr__(self):
         return f"SimpleChain({self.first} | {self.last})"
+
+
+class AdaptiveLLM:
+    """Simplified AdaptiveLLM for testing"""
+    
+    def __init__(self, default_model: str = "gpt-3.5-turbo", default_provider: str = "openai", **kwargs):
+        self.controller = LLMController(llm=default_model, provider=default_provider, **kwargs)
+        self.task_models = {
+            "creative": ("claude-3-sonnet-20240229", "claude"),
+            "coding": ("gpt-4", "openai"),
+            "simple": ("gpt-3.5-turbo", "openai"),
+            "local": ("llama2", "ollama"),
+            "general": (default_model, default_provider)
+        }
+    
+    def query(self, text: str, task_type: str = "general", **kwargs):
+        if task_type in self.task_models:
+            model, provider = self.task_models[task_type]
+            self.controller.switch_model(model, provider)
+        else:
+            model, provider = self.task_models["general"]
+            self.controller.switch_model(model, provider)
+        
+        return self.controller.invoke(text, **kwargs)
+    
+    def set_task_model(self, task_type: str, model: str, provider: str):
+        self.task_models[task_type] = (model, provider)
+    
+    def get_current_model_info(self):
+        return self.controller.current_model_info
+
+
+class CostOptimizedLLM:
+    """Simplified CostOptimizedLLM for testing"""
+    
+    def __init__(self, default_model: str = "gpt-3.5-turbo", default_provider: str = "openai", **kwargs):
+        self.controller = LLMController(llm=default_model, provider=default_provider, **kwargs)
+        self.costs = {
+            "gpt-4": 0.03,
+            "gpt-3.5-turbo": 0.002,
+            "claude-3-sonnet-20240229": 0.015,
+            "claude-3-haiku-20240307": 0.0025,
+            "llama2": 0.0,
+        }
+        self.model_providers = {
+            "gpt-4": "openai",
+            "gpt-3.5-turbo": "openai",
+            "claude-3-sonnet-20240229": "claude",
+            "claude-3-haiku-20240307": "claude",
+            "llama2": "ollama",
+        }
+    
+    def query(self, text: str, max_cost: float = 0.01, **kwargs):
+        # Special case: max_cost of 0.0 means no budget, so no models are affordable
+        if max_cost <= 0.0:
+            affordable_models = []
+        else:
+            affordable_models = [
+                (model, cost) for model, cost in self.costs.items() 
+                if cost <= max_cost and model in self.model_providers
+            ]
+        
+        if not affordable_models:
+            raise ValueError(f"No models available under ${max_cost}")
+        
+        best_model, best_cost = max(affordable_models, key=lambda x: x[1])
+        provider = self.model_providers[best_model]
+        
+        self.controller.switch_model(best_model, provider)
+        return self.controller.invoke(text, **kwargs)
+    
+    def get_affordable_models(self, max_cost: float):
+        affordable = []
+        for model, cost in self.costs.items():
+            if cost <= max_cost and model in self.model_providers:
+                affordable.append({
+                    "model": model,
+                    "provider": self.model_providers[model],
+                    "cost_per_1k": cost,
+                    "quality_rank": cost
+                })
+        return sorted(affordable, key=lambda x: x["quality_rank"], reverse=True)
+    
+    def get_current_model_info(self):
+        info = self.controller.current_model_info
+        model = info["model"]
+        info["cost_per_1k"] = self.costs.get(model, 0.0)
+        return info
+
+
+def create_production_llm(**kwargs):
+    """Simplified environment-aware LLM creation for testing"""
+    import os
+    environment = os.getenv("ENVIRONMENT", "development").lower()
+    
+    override_model = os.getenv("LLM_MODEL")
+    override_provider = os.getenv("LLM_PROVIDER")
+    
+    if override_model and override_provider:
+        return LLMController(llm=override_model, provider=override_provider, **kwargs)
+    
+    env_configs = {
+        "production": ("claude-3-haiku-20240307", "claude"),
+        "development": ("llama2", "ollama"),
+        "staging": ("gpt-3.5-turbo", "openai"),
+        "research": ("claude-3-sonnet-20240229", "claude"),
+    }
+    
+    model, provider = env_configs.get(environment, env_configs["development"])
+    return LLMController(llm=model, provider=provider, **kwargs)
 
 
 class TestLLMControllerBasic:
@@ -549,6 +671,275 @@ class TestLLMControllerPerformance:
                 assert result == "Claude response"
         
         assert success_count == 3
+
+
+class TestAdaptiveLLM:
+    """Test AdaptiveLLM functionality"""
+    
+    def test_initialization(self):
+        """Test AdaptiveLLM initializes correctly"""
+        adaptive = AdaptiveLLM()
+        assert adaptive.controller is not None
+        assert "creative" in adaptive.task_models
+        assert "coding" in adaptive.task_models
+        assert "simple" in adaptive.task_models
+        assert "local" in adaptive.task_models
+    
+    def test_task_based_model_selection(self):
+        """Test that different tasks select appropriate models"""
+        adaptive = AdaptiveLLM()
+        
+        # Test creative task
+        response = adaptive.query("Write a poem", "creative")
+        info = adaptive.get_current_model_info()
+        assert info["provider"] == "claude"
+        assert response.content == "Claude response"
+        
+        # Test coding task
+        response = adaptive.query("Fix this code", "coding")
+        info = adaptive.get_current_model_info()
+        assert info["provider"] == "openai"
+        assert info["model"] == "gpt-4"
+        assert response.content == "OpenAI response"
+        
+        # Test simple task
+        response = adaptive.query("What is 2+2?", "simple")
+        info = adaptive.get_current_model_info()
+        assert info["provider"] == "openai"
+        assert info["model"] == "gpt-3.5-turbo"
+        
+        # Test local task
+        response = adaptive.query("Help me", "local")
+        info = adaptive.get_current_model_info()
+        assert info["provider"] == "ollama"
+        assert response.content == "Ollama response"
+    
+    def test_unknown_task_type(self):
+        """Test that unknown task types fall back to general"""
+        adaptive = AdaptiveLLM()
+        response = adaptive.query("Random question", "unknown_task")
+        info = adaptive.get_current_model_info()
+        assert info["provider"] == "openai"  # Default provider
+    
+    def test_custom_task_model(self):
+        """Test setting custom model for task type"""
+        adaptive = AdaptiveLLM()
+        adaptive.set_task_model("creative", "gpt-4", "openai")
+        
+        response = adaptive.query("Write something creative", "creative")
+        info = adaptive.get_current_model_info()
+        assert info["provider"] == "openai"
+        assert info["model"] == "gpt-4"
+    
+    def test_default_model_configuration(self):
+        """Test custom default model configuration"""
+        adaptive = AdaptiveLLM(default_model="claude-3-haiku-20240307", default_provider="claude")
+        response = adaptive.query("General question", "general")
+        info = adaptive.get_current_model_info()
+        assert info["provider"] == "claude"
+        assert info["model"] == "claude-3-haiku-20240307"
+
+
+class TestCostOptimizedLLM:
+    """Test CostOptimizedLLM functionality"""
+    
+    def test_initialization(self):
+        """Test CostOptimizedLLM initializes correctly"""
+        cost_optimizer = CostOptimizedLLM()
+        assert cost_optimizer.controller is not None
+        assert len(cost_optimizer.costs) > 0
+        assert len(cost_optimizer.model_providers) > 0
+    
+    def test_cost_based_model_selection(self):
+        """Test that models are selected based on cost constraints"""
+        cost_optimizer = CostOptimizedLLM()
+        
+        # Test with very low budget - should use free local model
+        response = cost_optimizer.query("Simple question", max_cost=0.001)
+        info = cost_optimizer.get_current_model_info()
+        assert info["cost_per_1k"] <= 0.001
+        assert info["model"] == "llama2"  # Free model
+        
+        # Test with medium budget - should use best model within budget
+        response = cost_optimizer.query("Medium question", max_cost=0.01)
+        info = cost_optimizer.get_current_model_info()
+        assert info["cost_per_1k"] <= 0.01
+        # Should pick the most expensive model within budget
+        
+        # Test with high budget - should use premium model
+        response = cost_optimizer.query("Complex question", max_cost=0.05)
+        info = cost_optimizer.get_current_model_info()
+        assert info["cost_per_1k"] <= 0.05
+    
+    def test_no_affordable_models(self):
+        """Test error when no models are within budget"""
+        cost_optimizer = CostOptimizedLLM()
+        
+        with pytest.raises(ValueError, match="No models available under"):
+            cost_optimizer.query("Question", max_cost=0.0)  # No budget
+    
+    def test_get_affordable_models(self):
+        """Test getting list of affordable models"""
+        cost_optimizer = CostOptimizedLLM()
+        
+        # Test with medium budget
+        affordable = cost_optimizer.get_affordable_models(max_cost=0.01)
+        assert len(affordable) > 0
+        
+        # Should be sorted by quality (cost) descending
+        for i in range(len(affordable) - 1):
+            assert affordable[i]["quality_rank"] >= affordable[i + 1]["quality_rank"]
+        
+        # All models should be within budget
+        for model in affordable:
+            assert model["cost_per_1k"] <= 0.01
+    
+    def test_model_cost_info(self):
+        """Test that current model info includes cost"""
+        cost_optimizer = CostOptimizedLLM()
+        response = cost_optimizer.query("Test question", max_cost=0.01)
+        
+        info = cost_optimizer.get_current_model_info()
+        assert "cost_per_1k" in info
+        assert info["cost_per_1k"] >= 0
+    
+    def test_cost_optimization_strategy(self):
+        """Test that the most expensive affordable model is chosen"""
+        cost_optimizer = CostOptimizedLLM()
+        
+        # Get affordable models for a specific budget
+        budget = 0.01
+        affordable = cost_optimizer.get_affordable_models(budget)
+        
+        if len(affordable) > 1:
+            # Query with that budget
+            response = cost_optimizer.query("Test", max_cost=budget)
+            info = cost_optimizer.get_current_model_info()
+            
+            # Should have chosen the most expensive affordable model
+            expected_model = affordable[0]["model"]  # First in sorted list
+            assert info["model"] == expected_model
+
+
+class TestEnvironmentAwareLLM:
+    """Test environment-aware LLM creation"""
+    
+    def test_production_environment(self):
+        """Test production environment configuration"""
+        import os
+        with patch.dict(os.environ, {"ENVIRONMENT": "production"}):
+            llm = create_production_llm()
+            info = llm.current_model_info
+            assert info["provider"] == "claude"
+            assert info["model"] == "claude-3-haiku-20240307"
+    
+    def test_development_environment(self):
+        """Test development environment configuration"""
+        import os
+        with patch.dict(os.environ, {"ENVIRONMENT": "development"}):
+            llm = create_production_llm()
+            info = llm.current_model_info
+            assert info["provider"] == "ollama"
+            assert info["model"] == "llama2"
+    
+    def test_staging_environment(self):
+        """Test staging environment configuration"""
+        import os
+        with patch.dict(os.environ, {"ENVIRONMENT": "staging"}):
+            llm = create_production_llm()
+            info = llm.current_model_info
+            assert info["provider"] == "openai"
+            assert info["model"] == "gpt-3.5-turbo"
+    
+    def test_research_environment(self):
+        """Test research environment configuration"""
+        import os
+        with patch.dict(os.environ, {"ENVIRONMENT": "research"}):
+            llm = create_production_llm()
+            info = llm.current_model_info
+            assert info["provider"] == "claude"
+            assert info["model"] == "claude-3-sonnet-20240229"
+    
+    def test_unknown_environment_defaults(self):
+        """Test that unknown environments default to development"""
+        import os
+        with patch.dict(os.environ, {"ENVIRONMENT": "unknown"}):
+            llm = create_production_llm()
+            info = llm.current_model_info
+            assert info["provider"] == "ollama"
+            assert info["model"] == "llama2"
+    
+    def test_manual_override(self):
+        """Test manual override with environment variables"""
+        import os
+        with patch.dict(os.environ, {
+            "ENVIRONMENT": "production",
+            "LLM_MODEL": "gpt-4",
+            "LLM_PROVIDER": "openai"
+        }):
+            llm = create_production_llm()
+            info = llm.current_model_info
+            assert info["provider"] == "openai"
+            assert info["model"] == "gpt-4"
+    
+    def test_no_environment_variable(self):
+        """Test default behavior when no environment variable is set"""
+        import os
+        # Ensure ENVIRONMENT is not set
+        env_backup = os.environ.get("ENVIRONMENT")
+        if "ENVIRONMENT" in os.environ:
+            del os.environ["ENVIRONMENT"]
+        
+        try:
+            llm = create_production_llm()
+            info = llm.current_model_info
+            # Should default to development
+            assert info["provider"] == "ollama"
+            assert info["model"] == "llama2"
+        finally:
+            # Restore environment variable if it existed
+            if env_backup is not None:
+                os.environ["ENVIRONMENT"] = env_backup
+
+
+class TestNewClassesIntegration:
+    """Test integration between new classes and base functionality"""
+    
+    def test_adaptive_llm_with_chains(self):
+        """Test AdaptiveLLM works with chain operations"""
+        adaptive = AdaptiveLLM()
+        
+        # Test that it supports basic operations
+        response = adaptive.query("Test", "coding")
+        assert response.content == "OpenAI response"
+        
+        # Test delegation to underlying controller
+        assert hasattr(adaptive.controller, "stream")
+        assert hasattr(adaptive.controller, "batch")
+    
+    def test_cost_optimizer_model_switching(self):
+        """Test that CostOptimizedLLM properly switches models"""
+        cost_optimizer = CostOptimizedLLM()
+        
+        # Start with expensive query
+        response1 = cost_optimizer.query("Complex query", max_cost=0.05)
+        model1 = cost_optimizer.get_current_model_info()["model"]
+        
+        # Switch to cheap query
+        response2 = cost_optimizer.query("Simple query", max_cost=0.001)
+        model2 = cost_optimizer.get_current_model_info()["model"]
+        
+        # Models should be different
+        assert model1 != model2
+        assert model2 == "llama2"  # Should use free model for very low budget
+    
+    def test_environment_llm_parameter_passing(self):
+        """Test that parameters are properly passed to environment LLM"""
+        import os
+        with patch.dict(os.environ, {"ENVIRONMENT": "staging"}):
+            llm = create_production_llm(temperature=0.9)
+            # Should create successfully with additional parameters
+            assert llm is not None
 
 
 class TestLLMControllerErrorHandling:

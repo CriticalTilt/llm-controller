@@ -101,11 +101,6 @@ chain = prompt | llm | parser  # Works with ANY provider
 
 ### **1. Provider Abstraction & Consistency**
 ```python
-# Base models have different parameter names and patterns:
-claude = ChatAnthropic(model="claude-3-sonnet", api_key=anthropic_key)
-openai = ChatOpenAI(model="gpt-4", api_key=openai_key)  
-ollama = Ollama(model="llama2", base_url="http://localhost:11434")
-
 # LLMController unifies them:
 llm = LLMController(llm="claude-3-sonnet", provider="claude")
 llm.switch_model(llm="gpt-4", provider="openai")
@@ -115,74 +110,18 @@ llm.switch_model(llm="llama2", provider="ollama")
 
 ### **2. A/B Testing & Model Comparison**
 ```python
-def compare_models(question):
-    results = {}
-    llm = LLMController(llm="claude-3-sonnet", provider="claude")
-    
-    # Test multiple models with same code
-    models = [
-        ("claude", "claude-3-sonnet"),
-        ("openai", "gpt-4"),
-        ("openai", "gpt-3.5-turbo"),
-        ("ollama", "llama2")
-    ]
-    
-    for provider, model in models:
-        llm.switch_model(llm=model, provider=provider)
-        results[f"{provider}_{model}"] = llm.invoke(question)
-    
-    return results
-
 # Compare 4 different models with 6 lines of code!
 results = compare_models("Explain quantum computing")
 ```
 
 ### **3. Graceful Fallbacks & Error Recovery**
 ```python
-def robust_query(question):
-    llm = LLMController(llm="gpt-4", provider="openai")
-    
-    # Try premium model first, fallback to cheaper options
-    fallbacks = [
-        ("openai", "gpt-4"),
-        ("openai", "gpt-3.5-turbo"),
-        ("claude", "claude-3-haiku"),
-        ("ollama", "llama2")  # Free local fallback
-    ]
-    
-    for provider, model in fallbacks:
-        try:
-            llm.switch_model(llm=model, provider=provider)
-            return llm.invoke(question)
-        except Exception as e:
-            print(f"Failed with {provider}/{model}: {e}")
-            continue
-    
-    raise Exception("All models failed")
-
 # Automatic fallback chain!
 response = robust_query("Help me with this code")
 ```
 
 ### **4. Dynamic Configuration Based on Task**
 ```python
-class AdaptiveLLM:
-    def __init__(self):
-        self.controller = LLMController(llm="gpt-3.5-turbo", provider="openai")
-    
-    def query(self, text, task_type="general"):
-        # Choose optimal model based on task
-        if task_type == "creative":
-            self.controller.switch_model("claude-3-sonnet", "claude")
-        elif task_type == "coding":
-            self.controller.switch_model("gpt-4", "openai")
-        elif task_type == "simple":
-            self.controller.switch_model("gpt-3.5-turbo", "openai")
-        elif task_type == "local":
-            self.controller.switch_model("llama2", "ollama")
-        
-        return self.controller.invoke(text)
-
 # Automatically choose the best model for each task
 adaptive = AdaptiveLLM()
 creative_response = adaptive.query("Write a poem", "creative")
@@ -192,36 +131,6 @@ quick_response = adaptive.query("What's 2+2?", "simple")
 
 ### **5. Cost Optimization**
 ```python
-class CostOptimizedLLM:
-    def __init__(self):
-        self.controller = LLMController(llm="gpt-3.5-turbo", provider="openai")
-        self.costs = {
-            "gpt-4": 0.03,
-            "gpt-3.5-turbo": 0.002,
-            "claude-3-sonnet": 0.015,
-            "claude-3-haiku": 0.0025,
-            "llama2": 0.0  # Local
-        }
-    
-    def query(self, text, max_cost=0.01):
-        # Choose cheapest model under budget
-        affordable_models = [
-            (model, cost) for model, cost in self.costs.items() 
-            if cost <= max_cost
-        ]
-        
-        if not affordable_models:
-            raise ValueError(f"No models available under ${max_cost}")
-        
-        # Pick the most expensive model we can afford (best quality)
-        best_model = max(affordable_models, key=lambda x: x[1])[0]
-        
-        # Set provider based on model
-        provider = "openai" if "gpt" in best_model else "claude" if "claude" in best_model else "ollama"
-        self.controller.switch_model(best_model, provider)
-        
-        return self.controller.invoke(text)
-
 # Automatic cost optimization!
 cost_optimizer = CostOptimizedLLM()
 cheap_response = cost_optimizer.query("Simple question", max_cost=0.003)
@@ -230,20 +139,75 @@ premium_response = cost_optimizer.query("Complex analysis", max_cost=0.05)
 
 ### **6. Environment-Aware Deployment**
 ```python
-def create_production_llm():
-    """Create LLM based on environment"""
-    if os.getenv("ENVIRONMENT") == "production":
-        # Use reliable, fast models in production
-        return LLMController(llm="claude-3-haiku", provider="claude")
-    elif os.getenv("ENVIRONMENT") == "development":
-        # Use local models for development
-        return LLMController(llm="llama2", provider="ollama")
-    else:
-        # Use premium models for research
-        return LLMController(llm="claude-3-sonnet", provider="claude")
-
 # Same code, different models based on environment
 llm = create_production_llm()
+```
+
+## 🎯 **New Enhanced Classes**
+
+### **AdaptiveLLM - Task-Based Model Selection**
+```python
+from llm_controller import AdaptiveLLM
+
+# Create an adaptive LLM that chooses models based on task type
+adaptive = AdaptiveLLM()
+
+# Automatically selects Claude Sonnet for creative tasks
+creative_response = adaptive.query("Write a poem about AI", "creative")
+
+# Automatically selects GPT-4 for coding tasks  
+code_response = adaptive.query("Debug this Python function", "coding")
+
+# Automatically selects GPT-3.5-turbo for simple tasks
+quick_response = adaptive.query("What's 2+2?", "simple")
+
+# Automatically selects Llama2 for local/private tasks
+local_response = adaptive.query("Help me brainstorm", "local")
+
+# Customize task mappings
+adaptive.set_task_model("creative", "gpt-4", "openai")
+```
+
+### **CostOptimizedLLM - Budget-Aware Model Selection**
+```python
+from llm_controller import CostOptimizedLLM
+
+# Create a cost-aware LLM
+cost_optimizer = CostOptimizedLLM()
+
+# Query with a specific budget - automatically selects best model within budget
+cheap_response = cost_optimizer.query("Simple question", max_cost=0.003)
+premium_response = cost_optimizer.query("Complex analysis", max_cost=0.05)
+
+# See which models are available within your budget
+affordable_models = cost_optimizer.get_affordable_models(max_cost=0.01)
+for model in affordable_models:
+    print(f"{model['model']}: ${model['cost_per_1k']}/1k tokens")
+
+# Get cost information for current model
+info = cost_optimizer.get_current_model_info()
+print(f"Using {info['model']} at ${info['cost_per_1k']}/1k tokens")
+```
+
+### **Environment-Aware Deployment Function**
+```python
+import os
+from llm_controller import create_production_llm
+
+# Set environment and let the system choose appropriate models
+os.environ["ENVIRONMENT"] = "production"  # Uses Claude Haiku (fast, reliable)
+prod_llm = create_production_llm()
+
+os.environ["ENVIRONMENT"] = "development"  # Uses Llama2 (local, free)
+dev_llm = create_production_llm()
+
+os.environ["ENVIRONMENT"] = "research"  # Uses Claude Sonnet (premium quality)
+research_llm = create_production_llm()
+
+# Override with specific model
+os.environ["LLM_MODEL"] = "gpt-4"
+os.environ["LLM_PROVIDER"] = "openai"
+custom_llm = create_production_llm()  # Uses GPT-4 regardless of environment
 ```
 
 ## 🏗️ Architecture
@@ -365,6 +329,35 @@ llm.switch_model(llm="gpt-4", provider="openai")
 response = llm.invoke("Same question, different model")
 ```
 
+### Enhanced Classes Usage
+
+```python
+from llm_controller import (
+    LLMController, 
+    AdaptiveLLM, 
+    CostOptimizedLLM,
+    create_production_llm,
+    create_adaptive_llm,
+    create_cost_optimized_llm
+)
+
+# Task-based automatic model selection
+adaptive = create_adaptive_llm()
+creative_work = adaptive.query("Write a sonnet", "creative")  # Uses Claude
+code_help = adaptive.query("Fix this bug", "coding")  # Uses GPT-4
+quick_math = adaptive.query("What's 15% of 200?", "simple")  # Uses GPT-3.5
+
+# Budget-aware model selection
+optimizer = create_cost_optimized_llm()
+budget_response = optimizer.query("Analyze this data", max_cost=0.01)
+premium_response = optimizer.query("Deep analysis needed", max_cost=0.08)
+
+# Environment-aware deployment
+import os
+os.environ["ENVIRONMENT"] = "production"
+prod_llm = create_production_llm()  # Automatically uses production-appropriate model
+```
+
 ### With LangChain Chains
 
 ```python
@@ -426,6 +419,130 @@ models = {
 results = compare_models("What is the meaning of life?", models)
 for model, response in results.items():
     print(f"\n{model}: {response[:100]}...")
+```
+
+### Advanced Usage Patterns
+
+```python
+# 1. Multi-tier fallback system with cost optimization
+def intelligent_query(question, max_budget=0.02):
+    """Query with automatic fallbacks and cost optimization"""
+    
+    # Try cost-optimized approach first
+    cost_optimizer = CostOptimizedLLM()
+    try:
+        return cost_optimizer.query(question, max_cost=max_budget)
+    except Exception:
+        pass
+    
+    # Fallback to adaptive LLM with task detection
+    adaptive = AdaptiveLLM()
+    try:
+        # Simple heuristics for task type detection
+        if any(word in question.lower() for word in ['code', 'debug', 'function', 'bug']):
+            return adaptive.query(question, "coding")
+        elif any(word in question.lower() for word in ['poem', 'story', 'creative', 'write']):
+            return adaptive.query(question, "creative")
+        else:
+            return adaptive.query(question, "simple")
+    except Exception:
+        pass
+    
+    # Final fallback to basic controller with local model
+    controller = LLMController(llm="llama2", provider="ollama")
+    return controller.invoke(question)
+
+# 2. Dynamic model selection based on response quality needs
+def quality_aware_query(question, quality_level="balanced"):
+    """Select model based on desired quality level"""
+    
+    quality_configs = {
+        "premium": ("claude-3-opus-20240229", "claude"),
+        "balanced": ("claude-3-sonnet-20240229", "claude"), 
+        "fast": ("claude-3-haiku-20240307", "claude"),
+        "economical": ("gpt-3.5-turbo", "openai"),
+        "local": ("llama2", "ollama")
+    }
+    
+    model, provider = quality_configs.get(quality_level, quality_configs["balanced"])
+    controller = LLMController(llm=model, provider=provider)
+    return controller.invoke(question)
+
+# 3. Parallel model comparison for critical decisions
+import asyncio
+
+async def parallel_model_comparison(question):
+    """Query multiple models in parallel for comparison"""
+    
+    models = [
+        ("claude-3-sonnet-20240229", "claude"),
+        ("gpt-4", "openai"),
+        ("llama2", "ollama")
+    ]
+    
+    async def query_model(model_provider):
+        model, provider = model_provider
+        controller = LLMController(llm=model, provider=provider)
+        return {
+            "model": f"{provider}/{model}",
+            "response": controller.invoke(question)
+        }
+    
+    tasks = [query_model(mp) for mp in models]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    return results
+
+# 4. Context-aware model routing
+class ContextAwareRouter:
+    def __init__(self):
+        self.adaptive = AdaptiveLLM()
+        self.cost_optimizer = CostOptimizedLLM()
+        self.usage_history = []
+    
+    def route_query(self, question, context=None):
+        """Route query based on context and history"""
+        
+        # Track usage for optimization
+        self.usage_history.append({
+            "question": question,
+            "context": context,
+            "timestamp": time.time()
+        })
+        
+        # Context-based routing
+        if context:
+            if context.get("budget_sensitive"):
+                return self.cost_optimizer.query(question, max_cost=context.get("max_cost", 0.01))
+            elif context.get("task_type"):
+                return self.adaptive.query(question, context["task_type"])
+            elif context.get("environment") == "production":
+                prod_llm = create_production_llm()
+                return prod_llm.invoke(question)
+        
+        # Default to adaptive routing
+        return self.adaptive.query(question)
+
+# Usage examples
+router = ContextAwareRouter()
+
+# Budget-conscious query
+response1 = router.route_query(
+    "Summarize this article", 
+    {"budget_sensitive": True, "max_cost": 0.005}
+)
+
+# Task-specific query
+response2 = router.route_query(
+    "Review my code for bugs",
+    {"task_type": "coding"}
+)
+
+# Production environment query
+response3 = router.route_query(
+    "Generate user-facing content",
+    {"environment": "production"}
+)
 ```
 
 ### With LangChain Agents
