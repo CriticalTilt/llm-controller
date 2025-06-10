@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(pytest:*)",
-      "Bash(ollama list:*)"
-    ],
-    "deny": []
-  }
-}

@@ -1,5 +1,4 @@
 .env
-/.claude
-.claude
 .claude/
 __pycache__/
+.pytest_cache/
