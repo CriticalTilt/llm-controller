@@ -21,6 +21,14 @@ from typing import Dict, Any, Optional, Union, List, Iterator
 import requests
 import json
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    # dotenv is optional, continue without it
+    pass
+
 # Import LangChain components with fallbacks for different versions
 try:
     # Try new LangChain structure first (0.1+)
@@ -155,6 +163,16 @@ class SimpleChain:
         return f"SimpleChain({self.first} | {self.last})"
 
 
+def _load_env_defaults():
+    """Load default settings from environment variables (.env file)"""
+    return {
+        'provider': os.getenv('DEFAULT_PROVIDER', 'openai'),
+        'model': os.getenv('DEFAULT_MODEL', 'gpt-3.5-turbo'),
+        'temperature': float(os.getenv('DEFAULT_TEMPERATURE', '0.7')),
+        'max_tokens': int(os.getenv('DEFAULT_MAX_TOKENS', '1000')) if os.getenv('DEFAULT_MAX_TOKENS') else None
+    }
+
+
 class LLMController(Runnable):
     """
     A unified LLM controller that provides seamless switching between providers
@@ -171,15 +189,36 @@ class LLMController(Runnable):
         response = controller.invoke("Same interface!")
     """
     
-    def __init__(self, llm: str = "gpt-3.5-turbo", provider: str = "openai", **kwargs):
+    def __init__(self, llm: str = None, provider: str = None, temperature: float = None, max_tokens: int = None, **kwargs):
         """
         Initialize the LLM Controller
         
         Args:
-            llm: Model name (e.g., "claude-3-sonnet-20240229", "gpt-4")
-            provider: Provider name ("claude", "openai", "ollama", "grok", "huggingface")
+            llm: Model name (e.g., "claude-3-sonnet-20240229", "gpt-4"). Uses DEFAULT_MODEL from .env if not provided.
+            provider: Provider name ("claude", "openai", "ollama", "grok", "huggingface"). Uses DEFAULT_PROVIDER from .env if not provided.
+            temperature: Model temperature (0.0-1.0). Uses DEFAULT_TEMPERATURE from .env if not provided.
+            max_tokens: Maximum tokens to generate. Uses DEFAULT_MAX_TOKENS from .env if not provided.
             **kwargs: Additional parameters passed to underlying models
         """
+        # Load environment defaults
+        env_defaults = _load_env_defaults()
+        
+        # Use provided values or fall back to environment defaults
+        self.llm_name = llm or env_defaults['model']
+        self.provider = provider or env_defaults['provider']
+        
+        # Build model kwargs with defaults and overrides
+        self._model_kwargs = kwargs.copy()
+        if temperature is not None:
+            self._model_kwargs['temperature'] = temperature
+        elif 'temperature' not in self._model_kwargs:
+            self._model_kwargs['temperature'] = env_defaults['temperature']
+            
+        if max_tokens is not None:
+            self._model_kwargs['max_tokens'] = max_tokens
+        elif 'max_tokens' not in self._model_kwargs and env_defaults['max_tokens'] is not None:
+            self._model_kwargs['max_tokens'] = env_defaults['max_tokens']
+        
         # Only pass kwargs to super().__init__ if it accepts them
         try:
             # Check if parent class __init__ accepts parameters
@@ -194,10 +233,6 @@ class LLMController(Runnable):
             # Fallback: just call parent __init__ without parameters
             if hasattr(super(), '__init__'):
                 super().__init__()
-        
-        self.llm_name = llm
-        self.provider = provider
-        self._model_kwargs = kwargs
         
         # Provider factory mapping
         self.model_configs = {
@@ -284,16 +319,19 @@ class LLMController(Runnable):
         """Create Ollama model (local)"""
         base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         
-        # Build parameters, excluding None values
+        # Build parameters, excluding None values and unsupported parameters
         params = {
             "model": model_name,
             "base_url": base_url,
             "temperature": self._model_kwargs.get("temperature", 0.7),
         }
         
-        # Add other parameters, excluding temperature and None values
+        # Ollama doesn't support max_tokens - exclude it and other unsupported parameters
+        ollama_unsupported = {"max_tokens"}
+        
+        # Add other parameters, excluding temperature, unsupported params, and None values
         for k, v in self._model_kwargs.items():
-            if k != "temperature" and v is not None:
+            if k not in {"temperature"} | ollama_unsupported and v is not None:
                 params[k] = v
         
         return Ollama(**params)
@@ -998,32 +1036,18 @@ def create_cost_optimized_llm(**kwargs) -> CostOptimizedLLM:
 
 
 # Convenience functions for quick setup
-def create_controller(provider: str, model: str = None, **kwargs) -> LLMController:
+def create_controller(provider: str = None, model: str = None, **kwargs) -> LLMController:
     """
     Convenience function to create a controller with sensible defaults
     
     Args:
-        provider: Provider name ("claude", "openai", "ollama", etc.)
-        model: Model name (uses provider default if not specified)
+        provider: Provider name ("claude", "openai", "ollama", etc.). Uses DEFAULT_PROVIDER from .env if not specified.
+        model: Model name. Uses DEFAULT_MODEL from .env if not specified.
         **kwargs: Additional parameters
     
     Returns:
         Configured LLMController
     """
-    # Provider defaults
-    defaults = {
-        "claude": "claude-3-sonnet-20240229",
-        "openai": "gpt-3.5-turbo",
-        "ollama": "llama2",
-        "grok": "grok-beta",
-        "huggingface": "microsoft/DialoGPT-medium"
-    }
-    
-    if not model:
-        model = defaults.get(provider)
-        if not model:
-            raise ValueError(f"No default model for provider '{provider}'. Please specify a model.")
-    
     return LLMController(llm=model, provider=provider, **kwargs)
 
 
@@ -1033,15 +1057,16 @@ if __name__ == "__main__":
     print("=" * 60)
     
     try:
-        # Example with environment variables
-        from dotenv import load_dotenv
-        load_dotenv()
-        
-        print("\n1. Basic LLMController Example")
+        print("\n1. Basic LLMController Example with .env defaults")
         print("-" * 40)
-        controller = create_controller("claude", temperature=0.8)
-        print(f"Created: {controller}")
+        # Create controller using defaults from .env file
+        controller = create_controller()
+        print(f"Created with .env defaults: {controller}")
         print(f"Model info: {controller.current_model_info}")
+        
+        # Create controller with temperature override
+        controller_with_overrides = LLMController(temperature=0.9, max_tokens=500)
+        print(f"Created with overrides (temp=0.9, max_tokens=500): {controller_with_overrides}")
         
         # Test basic functionality
         response = controller.invoke("Say hello in one word.")
