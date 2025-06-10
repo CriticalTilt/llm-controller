@@ -59,6 +59,68 @@ except ImportError:
         ) from e
 
 
+class OllamaResponseHandler:
+    """
+    Handles Ollama-specific response formatting issues.
+    Ollama returns raw strings instead of Message objects, so this class
+    normalizes responses to maintain LangChain compatibility.
+    """
+    
+    @staticmethod
+    def normalize_response(response, provider: str):
+        """
+        Normalize response format based on provider
+        
+        Args:
+            response: Raw response from model
+            provider: Provider name ("ollama", "openai", etc.)
+            
+        Returns:
+            Normalized response (AIMessage for consistency)
+        """
+        if provider == "ollama" and isinstance(response, str):
+            return AIMessage(content=response)
+        return response
+    
+    @staticmethod
+    def normalize_batch_responses(responses, provider: str):
+        """
+        Normalize batch responses for provider compatibility
+        
+        Args:
+            responses: List of responses from model
+            provider: Provider name
+            
+        Returns:
+            List of normalized responses
+        """
+        if provider == "ollama":
+            normalized = []
+            for response in responses:
+                if isinstance(response, str):
+                    normalized.append(AIMessage(content=response))
+                else:
+                    normalized.append(response)
+            return normalized
+        return responses
+    
+    @staticmethod
+    def normalize_stream_chunk(chunk, provider: str):
+        """
+        Normalize streaming chunks for provider compatibility
+        
+        Args:
+            chunk: Individual stream chunk
+            provider: Provider name
+            
+        Returns:
+            Normalized chunk
+        """
+        if provider == "ollama" and isinstance(chunk, str):
+            return AIMessage(content=chunk)
+        return chunk
+
+
 class SimpleChain:
     """
     Simple chain implementation for fallback when RunnableSequence fails
@@ -294,12 +356,7 @@ class LLMController(Runnable):
         """
         try:
             response = self._current_model.invoke(input, config, **kwargs)
-            
-            # Handle Ollama's string response - wrap it in AIMessage for consistency
-            if self.provider == "ollama" and isinstance(response, str):
-                return AIMessage(content=response)
-            
-            return response
+            return OllamaResponseHandler.normalize_response(response, self.provider)
         except Exception as e:
             raise RuntimeError(
                 f"Error invoking {self.provider} model '{self.llm_name}': {e}"
@@ -310,12 +367,7 @@ class LLMController(Runnable):
         try:
             if hasattr(self._current_model, 'ainvoke'):
                 response = await self._current_model.ainvoke(input, config, **kwargs)
-                
-                # Handle Ollama's string response - wrap it in AIMessage for consistency
-                if self.provider == "ollama" and isinstance(response, str):
-                    return AIMessage(content=response)
-                
-                return response
+                return OllamaResponseHandler.normalize_response(response, self.provider)
             else:
                 # Fallback for models that don't support async
                 import asyncio
@@ -342,11 +394,7 @@ class LLMController(Runnable):
         """
         try:
             for chunk in self._current_model.stream(input, config, **kwargs):
-                # Handle Ollama's string chunks - wrap them in AIMessage for consistency
-                if self.provider == "ollama" and isinstance(chunk, str):
-                    yield AIMessage(content=chunk)
-                else:
-                    yield chunk
+                yield OllamaResponseHandler.normalize_stream_chunk(chunk, self.provider)
         except Exception as e:
             raise RuntimeError(
                 f"Error streaming from {self.provider} model '{self.llm_name}': {e}"
@@ -382,18 +430,7 @@ class LLMController(Runnable):
         try:
             if hasattr(self._current_model, 'batch'):
                 responses = self._current_model.batch(inputs, config, **kwargs)
-                
-                # Handle Ollama's string responses - wrap them in AIMessage for consistency
-                if self.provider == "ollama":
-                    processed_responses = []
-                    for response in responses:
-                        if isinstance(response, str):
-                            processed_responses.append(AIMessage(content=response))
-                        else:
-                            processed_responses.append(response)
-                    return processed_responses
-                
-                return responses
+                return OllamaResponseHandler.normalize_batch_responses(responses, self.provider)
             else:
                 # Fallback: process one by one
                 return [self.invoke(input, config, **kwargs) for input in inputs]
